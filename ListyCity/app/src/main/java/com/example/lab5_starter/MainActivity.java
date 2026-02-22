@@ -1,6 +1,7 @@
 package com.example.lab5_starter;
 
 import android.os.Bundle;
+import android.util.Log;
 import android.widget.ArrayAdapter;
 import android.widget.Button;
 import android.widget.ListView;
@@ -11,7 +12,13 @@ import androidx.core.graphics.Insets;
 import androidx.core.view.ViewCompat;
 import androidx.core.view.WindowInsetsCompat;
 
+import com.google.firebase.firestore.CollectionReference;
+import com.google.firebase.firestore.DocumentReference;
+import com.google.firebase.firestore.FirebaseFirestore;
+import com.google.firebase.firestore.QueryDocumentSnapshot;
+
 import java.util.ArrayList;
+import java.util.HashMap;
 
 public class MainActivity extends AppCompatActivity implements CityDialogFragment.CityDialogListener {
 
@@ -20,6 +27,9 @@ public class MainActivity extends AppCompatActivity implements CityDialogFragmen
 
     private ArrayList<City> cityArrayList;
     private ArrayAdapter<City> cityArrayAdapter;
+
+    private FirebaseFirestore db;
+    private CollectionReference citiesRef;
 
     @Override
     protected void onCreate(Bundle savedInstanceState) {
@@ -41,7 +51,25 @@ public class MainActivity extends AppCompatActivity implements CityDialogFragmen
         cityArrayAdapter = new CityArrayAdapter(this, cityArrayList);
         cityListView.setAdapter(cityArrayAdapter);
 
-        addDummyData();
+        db = FirebaseFirestore.getInstance();
+        citiesRef = db.collection("cities");
+
+        citiesRef.addSnapshotListener((value, error) ->{
+            if (error != null){
+                Log.e("Firestore", error.toString());
+            }
+            if (value != null){
+                cityArrayList.clear();
+                for(QueryDocumentSnapshot snapshot : value){
+                    String name = snapshot.getString("name");
+                    String province = snapshot.getString("province");
+
+                    cityArrayList.add(new City(name, province));
+                }
+                cityArrayAdapter.notifyDataSetChanged();
+            }
+
+        });
 
         // set listeners
         addCityButton.setOnClickListener(view -> {
@@ -55,29 +83,49 @@ public class MainActivity extends AppCompatActivity implements CityDialogFragmen
             cityDialogFragment.show(getSupportFragmentManager(),"City Details");
         });
 
+        cityListView.setOnItemLongClickListener((adapterView, view, i, l) -> {
+            City city = cityArrayAdapter.getItem(i);
+            if (city != null) {
+                citiesRef.document(city.getName()).delete();
+            }
+            return true;
+        });
+
     }
 
     @Override
     public void updateCity(City city, String title, String year) {
+        // Delete old document
+        citiesRef.document(city.getName()).delete();
+
+        // Update local object
         city.setName(title);
         city.setProvince(year);
-        cityArrayAdapter.notifyDataSetChanged();
 
-        // Updating the database using delete + addition
+        // Add updated city
+        HashMap<String, String> data = new HashMap<>();
+        data.put("name", city.getName());
+        data.put("province", city.getProvince());
+
+        citiesRef.document(city.getName()).set(data);
     }
 
     @Override
-    public void addCity(City city){
-        cityArrayList.add(city);
-        cityArrayAdapter.notifyDataSetChanged();
+    public void addCity(City city) {
 
-    }
+        // Firestore data
+        HashMap<String, String> data = new HashMap<>();
+        data.put("name", city.getName());
+        data.put("province", city.getProvince());
 
-    public void addDummyData(){
-        City m1 = new City("Edmonton", "AB");
-        City m2 = new City("Vancouver", "BC");
-        cityArrayList.add(m1);
-        cityArrayList.add(m2);
-        cityArrayAdapter.notifyDataSetChanged();
+        citiesRef
+                .document(city.getName())
+                .set(data)
+                .addOnSuccessListener(aVoid ->
+                        Log.d("Firestore", "City added: " + city.getName())
+                )
+                .addOnFailureListener(e ->
+                        Log.e("Firestore", "Error adding city", e)
+                );
     }
 }
